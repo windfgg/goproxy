@@ -32,6 +32,7 @@ type ProxyHttpServer struct {
 	ConnectDialWithReq func(req *http.Request, network string, addr string) (net.Conn, error)
 	CertStore          CertStorage
 	KeepHeader         bool
+	ConnSemaphore      chan struct{}
 }
 
 var hasPort = regexp.MustCompile(`:\d+$`)
@@ -60,7 +61,7 @@ func isEof(r *bufio.Reader) bool {
 func (proxy *ProxyHttpServer) filterRequest(r *http.Request, ctx *ProxyCtx) (req *http.Request, resp *http.Response) {
 	req = r
 	for _, h := range proxy.reqHandlers {
-		req, resp = h.Handle(r, ctx)
+		req, resp = h.Handle(req, ctx)
 		// non-nil resp means the handler decided to skip sending the request
 		// and return canned response instead.
 		if resp != nil {
@@ -150,7 +151,7 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			resp, err = ctx.RoundTrip(r)
 			if err != nil {
 				ctx.Error = err
-				resp = proxy.filterResponse(nil, ctx)
+				//resp = proxy.filterResponse(nil, ctx)
 
 			}
 			if resp != nil {
@@ -216,7 +217,8 @@ func NewProxyHttpServer() *ProxyHttpServer {
 		NonproxyHandler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "This is a proxy server. Does not respond to non-proxy requests.", 500)
 		}),
-		Tr: &http.Transport{TLSClientConfig: tlsClientSkipVerify, Proxy: http.ProxyFromEnvironment},
+		Tr:            &http.Transport{TLSClientConfig: tlsClientSkipVerify, Proxy: http.ProxyFromEnvironment},
+		ConnSemaphore: make(chan struct{}, 9999),
 	}
 
 	proxy.ConnectDial = dialerFromEnv(&proxy)
